@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 
+
 //import UIKit
 import AVFoundation
 import Dispatch
@@ -28,9 +29,43 @@ public class SwiftMicStreamPlugin: NSObject, FlutterStreamHandler, FlutterPlugin
     var BUFFER_SIZE = 4096;
     var eventSink:FlutterEventSink?;
     var session : AVCaptureSession!
+    var UID : String!
+    var aggregateDeviceID: AudioDeviceID = 0
     
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         switch call.method {
+            case "setUid":
+                if let args = call.arguments as? Dictionary<String, Any>,
+                    let uid = args["uid"] as? String {
+                    print("UID")
+                    print(uid)
+                    UID = uid;
+                    result(0)
+                } else {
+                    result(FlutterError.init(code: "bad args", message: nil, details: nil))
+                }
+                break;
+            case "getDevices":
+                result(getDevices())
+                break;
+            case "createMultiOutputDevice":
+                if let args = call.arguments as? Dictionary<String, Any>,
+                   let masterUid = args["masterUID"] as? String,
+                   let secondUid = args["secondUID"] as? String,
+                   let multiOutUID = args["multiOutUID"] as? String
+                {
+                    var res = createMultiOutputAudioDevice(masterDeviceUID: masterUid as CFString, secondDeviceUID: secondUid as CFString, multiOutUID: multiOutUID)
+                    setDefaultOutputDevice(devId: res.1)
+                    result(0)
+                } else {
+                    result(FlutterError.init(code: "bad args", message: nil, details: nil))
+                }
+                
+                break;
+            case "destroyMultiOutputDevice":
+                AudioHardwareDestroyAggregateDevice(aggregateDeviceID);
+                result(0)
+                break;
             case "getSampleRate":
                 result(self.actualSampleRate)
                 break;
@@ -93,7 +128,7 @@ public class SwiftMicStreamPlugin: NSObject, FlutterStreamHandler, FlutterPlugin
     }
     
     func startCapture() {
-        if let audioCaptureDevice : AVCaptureDevice = AVCaptureDevice.default(for:AVMediaType.audio) {
+        if let audioCaptureDevice : AVCaptureDevice = UID == "" ? AVCaptureDevice.default(for:AVMediaType.audio) : AVCaptureDevice.init(uniqueID: UID){
 
             self.session = AVCaptureSession()
             do {
@@ -166,5 +201,171 @@ public class SwiftMicStreamPlugin: NSObject, FlutterStreamHandler, FlutterPlugin
         let data = Data(bytesNoCopy: audioBufferList.unsafePointer.pointee.mBuffers.mData!, count: Int(audioBufferList.unsafePointer.pointee.mBuffers.mDataByteSize), deallocator: .none)
         self.eventSink!(FlutterStandardTypedData(bytes: data))
 
+    }
+
+    public func getDevices() -> Array<Array<String>>{
+        let devices = AVCaptureDevice.devices(for: .audio)
+        var ids: [Array<String>] = []
+        for device in devices {
+            let device: [String] = [ device.uniqueID, device.localizedName, "IN"]
+            ids.append(device)
+        }
+        let outputDevices = AudioDeviceFinder.findDevices()
+        for device in outputDevices {
+            let device: [String] = [ device.uid ?? "", device.name ?? "", "OUT"]
+            ids.append(device)
+        }
+        return ids
+    }
+    
+    func createMultiOutputAudioDevice(masterDeviceUID: CFString, secondDeviceUID: CFString, multiOutUID: String) -> (OSStatus, AudioDeviceID) {
+        let desc: [String : Any] = [
+                kAudioAggregateDeviceNameKey: "Inturo Output Device",
+                kAudioAggregateDeviceUIDKey: multiOutUID,
+                kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: masterDeviceUID], [kAudioSubDeviceUIDKey: secondDeviceUID]],
+                kAudioAggregateDeviceMasterSubDeviceKey: masterDeviceUID,
+                kAudioAggregateDeviceIsStackedKey: 1,
+            ]
+        let dev = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &aggregateDeviceID)
+        
+        return (dev, aggregateDeviceID)
+    }
+    
+    func setDefaultOutputDevice(devId: AudioDeviceID) -> OSStatus{
+        var pointer = devId
+        var address = AudioObjectPropertyAddress(
+          mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+          mScope: kAudioObjectPropertyScopeGlobal,
+          mElement: kAudioObjectPropertyElementMaster)
+        var statusCode = AudioObjectSetPropertyData(
+          AudioObjectID(kAudioObjectSystemObject),
+          &address,
+          0,
+          nil,
+          UInt32(MemoryLayout<AudioDeviceID>.size),
+          &pointer
+        )
+        return statusCode
+    }
+
+
+}
+
+class AudioDevice {
+    var audioDeviceID:AudioDeviceID
+
+    init(deviceID:AudioDeviceID) {
+        self.audioDeviceID = deviceID
+    }
+
+    var hasOutput: Bool {
+        get {
+            var address:AudioObjectPropertyAddress = AudioObjectPropertyAddress(
+                mSelector:AudioObjectPropertySelector(kAudioDevicePropertyStreamConfiguration),
+                mScope:AudioObjectPropertyScope(kAudioDevicePropertyScopeOutput),
+                mElement:0)
+
+            var propsize:UInt32 = UInt32(MemoryLayout<CFString?>.size);
+            var result:OSStatus = AudioObjectGetPropertyDataSize(self.audioDeviceID, &address, 0, nil, &propsize);
+            if (result != 0) {
+                return false;
+            }
+
+            let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity:Int(propsize))
+            result = AudioObjectGetPropertyData(self.audioDeviceID, &address, 0, nil, &propsize, bufferList);
+            if (result != 0) {
+                return false
+            }
+
+            let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+            for bufferNum in 0..<buffers.count {
+                if buffers[bufferNum].mNumberChannels > 0 {
+                    return true
+                }
+            }
+
+            return false
+        }
+    }
+
+    var uid:String? {
+        get {
+            var address:AudioObjectPropertyAddress = AudioObjectPropertyAddress(
+                mSelector:AudioObjectPropertySelector(kAudioDevicePropertyDeviceUID),
+                mScope:AudioObjectPropertyScope(kAudioObjectPropertyScopeGlobal),
+                mElement:AudioObjectPropertyElement(kAudioObjectPropertyElementMaster))
+
+            var name:CFString? = nil
+            var propsize:UInt32 = UInt32(MemoryLayout<CFString?>.size)
+            let result:OSStatus = AudioObjectGetPropertyData(self.audioDeviceID, &address, 0, nil, &propsize, &name)
+            if (result != 0) {
+                return nil
+            }
+
+            return name as String?
+        }
+    }
+
+    var name:String? {
+        get {
+            var address:AudioObjectPropertyAddress = AudioObjectPropertyAddress(
+                mSelector:AudioObjectPropertySelector(kAudioDevicePropertyDeviceNameCFString),
+                mScope:AudioObjectPropertyScope(kAudioObjectPropertyScopeGlobal),
+                mElement:AudioObjectPropertyElement(kAudioObjectPropertyElementMaster))
+
+            var name:CFString? = nil
+            var propsize:UInt32 = UInt32(MemoryLayout<CFString?>.size)
+            let result:OSStatus = AudioObjectGetPropertyData(self.audioDeviceID, &address, 0, nil, &propsize, &name)
+            if (result != 0) {
+                return nil
+            }
+
+            return name as String?
+        }
+    }
+}
+
+
+class AudioDeviceFinder {
+    static func findDevices() -> Array<AudioDevice>{
+        var audioDevices: [AudioDevice] = []
+        var propsize:UInt32 = 0
+
+        var address:AudioObjectPropertyAddress = AudioObjectPropertyAddress(
+            mSelector:AudioObjectPropertySelector(kAudioHardwarePropertyDevices),
+            mScope:AudioObjectPropertyScope(kAudioObjectPropertyScopeGlobal),
+            mElement:AudioObjectPropertyElement(kAudioObjectPropertyElementMaster))
+
+        var result:OSStatus = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, UInt32(MemoryLayout<AudioObjectPropertyAddress>.size), nil, &propsize)
+
+        if (result != 0) {
+            print("Error \(result) from AudioObjectGetPropertyDataSize")
+            return audioDevices
+        }
+
+        let numDevices = Int(propsize / UInt32(MemoryLayout<AudioDeviceID>.size))
+
+        var devids = [AudioDeviceID]()
+        for _ in 0..<numDevices {
+            devids.append(AudioDeviceID())
+        }
+
+        result = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &propsize, &devids);
+        if (result != 0) {
+            print("Error \(result) from AudioObjectGetPropertyData")
+            return audioDevices
+        }
+
+        for i in 0..<numDevices {
+            let audioDevice = AudioDevice(deviceID:devids[i])
+            if (audioDevice.hasOutput) {
+                audioDevices.append(audioDevice)
+                if let name = audioDevice.name,
+                    let uid = audioDevice.uid {
+                    print("Found device \"\(name)\", uid=\(uid)")
+                }
+            }
+        }
+        return audioDevices;
     }
 }

@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart' as handler;
 import 'package:flutter/services.dart';
 import 'dart:typed_data';
+
+import 'audio_device.dart';
 
 // In reference to the implementation of the official sensors plugin
 // https://github.com/flutter/plugins/tree/master/packages/sensors
@@ -19,10 +22,11 @@ enum AudioSource {
   VOICE_COMMUNICATION,
   REMOTE_SUBMIX,
   UNPROCESSED,
-  VOICE_PERFORMANCE
+  VOICE_PERFORMANCE,
+  AUDIO_LOOPBACK
 }
 enum ChannelConfig { CHANNEL_IN_MONO, CHANNEL_IN_STEREO }
-enum AudioFormat { ENCODING_PCM_8BIT, ENCODING_PCM_16BIT }
+enum AudioFormat { ENCODING_PCM_8BIT, ENCODING_PCM_16BIT, ENCODING_PCM_32BIT}
 
 class MicStream {
   static const AudioSource _DEFAULT_AUDIO_SOURCE = AudioSource.DEFAULT;
@@ -78,12 +82,15 @@ class MicStream {
       {AudioSource audioSource: _DEFAULT_AUDIO_SOURCE,
       int sampleRate: _DEFAULT_SAMPLE_RATE,
       ChannelConfig channelConfig: _DEFAULT_CHANNELS_CONFIG,
-      AudioFormat audioFormat: _DEFAULT_AUDIO_FORMAT}) async {
+      AudioFormat audioFormat: _DEFAULT_AUDIO_FORMAT,
+      String uid: ""}) async {
     if (sampleRate < _MIN_SAMPLE_RATE || sampleRate > _MAX_SAMPLE_RATE)
       throw (RangeError.range(sampleRate, _MIN_SAMPLE_RATE, _MAX_SAMPLE_RATE));
     if (!(await permissionStatus))
       throw (PlatformException);
-
+    await _microphoneMethodChannel.invokeMethod("setUid",<String, dynamic>{
+      'uid': uid,
+    });
     _microphone = _microphone ??
         _microphoneEventChannel.receiveBroadcastStream([
           audioSource.index,
@@ -115,5 +122,49 @@ class MicStream {
     });
 
     return _microphone;
+  }
+
+  static Future<List<AudioDevice>> getDevices() async{
+    List<AudioDevice> devices = [];
+    if(Platform.isMacOS || Platform.isWindows){
+      var dev = await _microphoneMethodChannel.invokeMethod("getDevices") as List<dynamic>;
+      dev.forEach((d) {
+        var ad = AudioDevice(d[0],d[1], d[2] == "IN" ? AudioDirection.Input : AudioDirection.Output);
+        devices.add(ad);
+        if(!kReleaseMode)
+          print(ad);
+      });
+    }
+    return devices;
+  }
+
+  //Only MacOS
+  static Future<AudioDevice?> createMultiOutputDevice(String masterUID, String secondUID, String multiOutputUID) async{
+    AudioDevice audioDev = AudioDevice("", "", AudioDirection.Input);
+    if(Platform.isMacOS){
+      await _microphoneMethodChannel.invokeMethod("createMultiOutputDevice",<String, dynamic>{
+        'masterUID': masterUID,
+        'secondUID': secondUID,
+        'multiOutUID': multiOutputUID,
+      });
+      var devices = await getDevices();
+      devices.forEach((d) {
+        if(d.Uid == multiOutputUID){
+          audioDev = d;
+        }
+      });
+      if(audioDev.Uid != ""){
+        return audioDev;
+      }
+    }
+    throw Exception("Device is not created");
+  }
+  static Future<void> destroyMultiOutputDevice() async {
+    if (Platform.isMacOS) {
+      await _microphoneMethodChannel.invokeMethod(
+          "destroyMultiOutputDevice", <String, dynamic>{
+        'multiOutUID': "",
+      });
+    }
   }
 }

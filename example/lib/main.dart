@@ -90,11 +90,13 @@ class _MicStreamExampleAppState extends State<MicStreamExampleApp>
     // method to get the stream, we don't yet have access
     // to the sampleRate and bitDepth properties
     print("wait for stream");
+    await MicStream.createMultiOutputDevice("BuiltInSpeakerDevice", "BlackHole2ch_UID", "InturoDesktop_UID");
     stream = await MicStream.microphone(
         audioSource: AudioSource.DEFAULT,
         sampleRate: 16000,
         channelConfig: ChannelConfig.CHANNEL_IN_MONO,
-        audioFormat: AUDIO_FORMAT);
+        audioFormat: AUDIO_FORMAT,
+        uid: "BlackHole2ch_UID");
     // after invoking the method for the first time, though, these will be available;
     // It is not necessary to setup a listener first, the stream only needs to be returned first
     print("Start Listening to the microphone, sample rate is ${await MicStream.sampleRate}, bit depth is ${await MicStream.bitDepth}, bufferSize: ${await MicStream.bufferSize}");
@@ -169,7 +171,7 @@ class _MicStreamExampleAppState extends State<MicStreamExampleApp>
     if (!isRecording) return false;
     print("Stop Listening to the microphone");
     listener.cancel();
-
+    MicStream.destroyMultiOutputDevice();
     setState(() {
       isRecording = false;
       currentSamples = null;
@@ -221,15 +223,15 @@ class _MicStreamExampleAppState extends State<MicStreamExampleApp>
             items: [
               BottomNavigationBarItem(
                 icon: Icon(Icons.broken_image),
-                title: Text("Sound Wave"),
+                label: "Sound Wave",
               ),
               BottomNavigationBarItem(
                 icon: Icon(Icons.broken_image),
-                title: Text("Intensity Wave"),
+                label: "Intensity Wave",
               ),
               BottomNavigationBarItem(
                 icon: Icon(Icons.view_list),
-                title: Text("Statistics"),
+                label: "Statistics",
               )
             ],
             backgroundColor: Colors.black26,
@@ -362,6 +364,13 @@ class Statistics extends StatelessWidget {
           title: Text((isRecording
               ? DateTime.now().difference(startTime!).toString()
               : "Not recording"))),
+      ListTile(
+        leading: Icon(Icons.device_hub),
+        title: Text("Devices"),
+        onTap: () async {
+          await MicStream.getDevices();
+        },
+      ),
     ]);
   }
 }
