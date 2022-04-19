@@ -167,4 +167,12 @@ class MicStream {
       });
     }
   }
+
+  static Future<bool> requestMicrophoneAccess() async {
+    if (Platform.isMacOS) {
+      return await _microphoneMethodChannel.invokeMethod("requestMicrophoneAccess");
+    }
+    else
+      return false;
+  }
 }

@@ -48,13 +48,16 @@ public class SwiftMicStreamPlugin: NSObject, FlutterStreamHandler, FlutterPlugin
             case "getDevices":
                 result(getDevices())
                 break;
+            case "requestMicrophoneAccess":
+                result(requestMicrophoneAccess())
+                break;
             case "createMultiOutputDevice":
                 if let args = call.arguments as? Dictionary<String, Any>,
                    let masterUid = args["masterUID"] as? String,
                    let secondUid = args["secondUID"] as? String,
                    let multiOutUID = args["multiOutUID"] as? String
                 {
-                    var res = createMultiOutputAudioDevice(masterDeviceUID: masterUid as CFString, secondDeviceUID: secondUid as CFString, multiOutUID: multiOutUID)
+                    let res = createMultiOutputAudioDevice(masterDeviceUID: masterUid as CFString, secondDeviceUID: secondUid as CFString, multiOutUID: multiOutUID)
                     setDefaultOutputDevice(devId: res.1)
                     result(0)
                 } else {
@@ -78,6 +81,32 @@ public class SwiftMicStreamPlugin: NSObject, FlutterStreamHandler, FlutterPlugin
             default:
                 result(FlutterMethodNotImplemented)
         }
+    }
+    
+    public func requestMicrophoneAccess() -> Bool{
+        var status = false;
+        if #available(macOS 10.14, *) {
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized: // The user has previously granted access to the camera.
+                return true
+                
+            case .notDetermined: // The user has not yet been asked for camera access.
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    if granted {
+                        status = true
+                    }
+                }
+                
+            case .denied: // The user has previously denied access.
+                return false
+                
+            case .restricted: // The user can't grant access due to restrictions.
+                return false
+            }
+        } else {
+            // Fallback on earlier versions
+        }
+        return status
     }
     
     public func onCancel(withArguments arguments:Any?) -> FlutterError?  {
@@ -237,7 +266,7 @@ public class SwiftMicStreamPlugin: NSObject, FlutterStreamHandler, FlutterPlugin
           mSelector: kAudioHardwarePropertyDefaultOutputDevice,
           mScope: kAudioObjectPropertyScopeGlobal,
           mElement: kAudioObjectPropertyElementMaster)
-        var statusCode = AudioObjectSetPropertyData(
+        let statusCode = AudioObjectSetPropertyData(
           AudioObjectID(kAudioObjectSystemObject),
           &address,
           0,

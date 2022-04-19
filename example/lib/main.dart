@@ -368,6 +368,7 @@ class Statistics extends StatelessWidget {
         leading: Icon(Icons.device_hub),
         title: Text("Devices"),
         onTap: () async {
+          await MicStream.requestMicrophoneAccess();
           await MicStream.getDevices();
         },
       ),
