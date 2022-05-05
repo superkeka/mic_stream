@@ -19,7 +19,10 @@ enum Command {
 
 const AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
 
-void main() => runApp(MicStreamExampleApp());
+void main(){
+  MicStream.initialize();
+  runApp(MicStreamExampleApp());
+}
 
 class MicStreamExampleApp extends StatefulWidget {
   @override
@@ -84,19 +87,19 @@ class _MicStreamExampleAppState extends State<MicStreamExampleApp>
   late int samplesPerSecond;
 
   Future<bool> _startListening() async {
-    print("STARRT LISTENING");
     if (isRecording) return false;
     // if this is the first time invoking the microphone()
     // method to get the stream, we don't yet have access
     // to the sampleRate and bitDepth properties
-    print("wait for stream");
-    await MicStream.createMultiOutputDevice("BuiltInSpeakerDevice", "BlackHole2ch_UID", "InturoDesktop_UID");
+    if(Platform.isMacOS){
+      await MicStream.createMultiOutputDevice("BuiltInSpeakerDevice", "BlackHole2ch_UID", "InturoDesktop_UID");
+    }
     stream = await MicStream.microphone(
         audioSource: AudioSource.DEFAULT,
-        sampleRate: 16000,
+        sampleRate: 44100,
         channelConfig: ChannelConfig.CHANNEL_IN_MONO,
         audioFormat: AUDIO_FORMAT,
-        uid: "BlackHole2ch_UID");
+    );
     // after invoking the method for the first time, though, these will be available;
     // It is not necessary to setup a listener first, the stream only needs to be returned first
     print("Start Listening to the microphone, sample rate is ${await MicStream.sampleRate}, bit depth is ${await MicStream.bitDepth}, bufferSize: ${await MicStream.bufferSize}");
@@ -111,6 +114,7 @@ class _MicStreamExampleAppState extends State<MicStreamExampleApp>
     });
     visibleSamples = [];
     listener = stream!.listen(_calculateSamples);
+
     return true;
   }
 

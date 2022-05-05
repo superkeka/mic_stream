@@ -1,7 +1,13 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:ffi';
 
+import 'dart:io';
+import 'dart:isolate';
+
+import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
+import 'package:mic_stream/win/installer.dart';
+import 'package:mic_stream/win/port_audio.dart';
 import 'package:permission_handler/permission_handler.dart' as handler;
 import 'package:flutter/services.dart';
 import 'dart:typed_data';
@@ -39,6 +45,7 @@ class MicStream {
   static const int _MIN_SAMPLE_RATE = 1;
   static const int _MAX_SAMPLE_RATE = 100000;
 
+
   static const EventChannel _microphoneEventChannel =
       EventChannel('aaron.code.com/mic_stream');
   static const MethodChannel _microphoneMethodChannel =
@@ -60,7 +67,7 @@ class MicStream {
 
   // This function manages the permission and ensures you're allowed to record audio
   static Future<bool> get permissionStatus async {
-    if(Platform.isMacOS){
+    if(Platform.isMacOS || Platform.isWindows){
       return true;
     }
     var micStatus = await handler.Permission.microphone.request();
@@ -83,25 +90,31 @@ class MicStream {
       int sampleRate: _DEFAULT_SAMPLE_RATE,
       ChannelConfig channelConfig: _DEFAULT_CHANNELS_CONFIG,
       AudioFormat audioFormat: _DEFAULT_AUDIO_FORMAT,
-      String uid: ""}) async {
+      String uid: "" }) async {
     if (sampleRate < _MIN_SAMPLE_RATE || sampleRate > _MAX_SAMPLE_RATE)
       throw (RangeError.range(sampleRate, _MIN_SAMPLE_RATE, _MAX_SAMPLE_RATE));
     if (!(await permissionStatus))
       throw (PlatformException);
-    await _microphoneMethodChannel.invokeMethod("setUid",<String, dynamic>{
-      'uid': uid,
-    });
-    _microphone = _microphone ??
-        _microphoneEventChannel.receiveBroadcastStream([
-          audioSource.index,
-          sampleRate,
-          channelConfig == ChannelConfig.CHANNEL_IN_MONO ? 16 : 12,
-          audioFormat == AudioFormat.ENCODING_PCM_8BIT ? 3 : 2
-        ]).cast<Uint8List>();
+
+    if(Platform.isMacOS){
+      await _microphoneMethodChannel.invokeMethod("setUid",<String, dynamic>{
+        'uid': uid,
+      });
+    }
+    if(!Platform.isWindows) {
+      _microphone = _microphone ??
+          _microphoneEventChannel.receiveBroadcastStream([
+            audioSource.index,
+            sampleRate,
+            channelConfig == ChannelConfig.CHANNEL_IN_MONO ? 16 : 12,
+            audioFormat == AudioFormat.ENCODING_PCM_8BIT ? 3 : 2
+          ]).cast<Uint8List>();
+    }
 
     // sampleRate/bitDepth should be populated before any attempt to consume the stream externally.
     // configure these as Completers and listen to the stream internally before returning
     // these will complete only when this internal listener is called
+
     StreamSubscription<Uint8List>? listener;
     var sampleRateCompleter = new Completer<double>();
     var bitDepthCompleter = new Completer<int>();
@@ -109,8 +122,69 @@ class MicStream {
     _sampleRate = sampleRateCompleter.future;
     _bitDepth = bitDepthCompleter.future;
     _bufferSize = bufferSizeCompleter.future;
+    if(Platform.isWindows){
+      const int bufferSize = 256;
+      var receivePort = ReceivePort();
+      var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
+      int result = 0;
+      if(uid == ""){
+        var inputDevice = PortAudio.getDefaultInputDevice();
+        var inputDeviceInfo = PortAudio.getDeviceInfo(inputDevice);
+        sampleRateCompleter.complete(inputDeviceInfo.defaultSampleRate.toDouble());
+        bitDepthCompleter.complete(2048);
+        bufferSizeCompleter.complete(bufferSize);
+        result = PortAudio.openDefaultStream(stream, 1, 0,
+            SampleFormat.int16, sampleRate.toDouble(),
+            bufferSize, receivePort.sendPort, nullptr);
+      }
+      else {
+        var p = Pointer<StreamParameters>.fromAddress(malloc<IntPtr>().address);
+        var index = int.parse(uid);
+        var inputDeviceInfo = PortAudio.getDeviceInfo(index);
+        sampleRateCompleter.complete(inputDeviceInfo.defaultSampleRate.toDouble());
+        bitDepthCompleter.complete(2048);
+        bufferSizeCompleter.complete(bufferSize);
+        p.ref.device = index;
+        p.ref.channelCount = 1;
+        p.ref.sampleFormat = SampleFormat.int16;
+        p.ref.suggestedLatency = inputDeviceInfo.defaultLowInputLatency;
+        p.ref.hostApiSpecificStreamInfo = nullptr;
+        print(inputDeviceInfo.defaultSampleRate);
+        result = PortAudio.openStream(stream, p, nullptr,
+            inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
+            StreamFlags.noFlag, receivePort.sendPort, nullptr);
+      }
+      result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort);
+      result = PortAudio.startStream(stream);
+      StreamController<Uint8List> controller;
+      controller = StreamController<Uint8List>.broadcast(onListen: () async {},
+          onCancel: (){
+            PortAudio.stopStream(stream);
+            //PortAudio.closeStream(stream);
+            //malloc.free(stream.value);
+            //malloc.free(stream);
+         }
+      );
+      _microphone = controller.stream;
+      receivePort.listen((message) {
+        final translatedMessage = MessageTranslator(message);
+        final messageType = translatedMessage.messageType;
+        final outputPointer = translatedMessage.inputPointer?.cast<Int16>();
+        final frameCount = translatedMessage.frameCount;
+        var byteData = ByteData(sizeOf<Int16>()*bufferSize);
+        for(var i = 0; messageType == MessageTranslator.messageTypeCallback && i < frameCount!; i++) {
+          byteData.setInt16(i*sizeOf<Int16>(), outputPointer![i], Endian.little);
+        }
+        var bytes = byteData.buffer.asUint8List();
+        controller.add(bytes);
 
-    listener = _microphone!.listen((x) async {
+        PortAudio.setStreamResult(StreamCallbackResult.continueProcessing);
+      });
+      return _microphone;
+    }
+
+
+    listener = _microphone?.listen((x) async {
       await listener!.cancel();
       listener = null;
       sampleRateCompleter.complete(await _microphoneMethodChannel
@@ -124,21 +198,42 @@ class MicStream {
     return _microphone;
   }
 
+  static Future<void> initialize() async{
+    if(Platform.isWindows){
+      await Installer.unpackDependencies();
+      String? dependencyDir = await Installer.getDependenciesLocationDir();
+      PortAudio.initialize(dependencyDir);
+    }
+
+  }
+
   static Future<List<AudioDevice>> getDevices() async{
     List<AudioDevice> devices = [];
-    if(Platform.isMacOS || Platform.isWindows){
+    if(Platform.isMacOS){
       var dev = await _microphoneMethodChannel.invokeMethod("getDevices") as List<dynamic>;
       dev.forEach((d) {
         var ad = AudioDevice(d[0],d[1], d[2] == "IN" ? AudioDirection.Input : AudioDirection.Output);
         devices.add(ad);
-        if(!kReleaseMode)
+        if(kDebugMode)
           print(ad);
       });
+    }
+    else if(Platform.isWindows){
+      for(int i = 0; i < PortAudio.getDeviceCount(); i++){
+        var paDevice = PortAudio.getDeviceInfo(i);
+        AudioDirection direction =  paDevice.maxOutputChannels > 0 ?
+        AudioDirection.Output : AudioDirection.Input;
+        var ad = AudioDevice(i.toString(),paDevice.name, direction);
+        devices.add(ad);
+        if(kDebugMode)
+          print(ad);
+      }
+
     }
     return devices;
   }
 
-  //Only MacOS
+  ///Only for MacOS
   static Future<AudioDevice?> createMultiOutputDevice(String masterUID, String secondUID, String multiOutputUID) async{
     AudioDevice audioDev = AudioDevice("", "", AudioDirection.Input);
     if(Platform.isMacOS){
@@ -159,6 +254,7 @@ class MicStream {
     }
     throw Exception("Device is not created");
   }
+
   static Future<void> destroyMultiOutputDevice() async {
     if (Platform.isMacOS) {
       await _microphoneMethodChannel.invokeMethod(
