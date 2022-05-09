@@ -138,7 +138,7 @@ class MicStream {
             bufferSize, receivePort.sendPort, nullptr);
       }
       else {
-        var p = Pointer<StreamParameters>.fromAddress(malloc<IntPtr>().address);
+        final Pointer<StreamParameters> p = calloc<StreamParameters>();
         var index = int.parse(uid);
         var inputDeviceInfo = PortAudio.getDeviceInfo(index);
         sampleRateCompleter.complete(inputDeviceInfo.defaultSampleRate.toDouble());
@@ -154,18 +154,26 @@ class MicStream {
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
             StreamFlags.noFlag, receivePort.sendPort, nullptr);
       }
-      result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort);
-      result = PortAudio.startStream(stream);
       StreamController<Uint8List> controller;
       controller = StreamController<Uint8List>.broadcast(onListen: () async {},
           onCancel: (){
-            PortAudio.stopStream(stream);
-            //PortAudio.closeStream(stream);
+            if(result == 0){
+              PortAudio.stopStream(stream);
+              //PortAudio.closeStream(stream);
+            }
             //malloc.free(stream.value);
             //malloc.free(stream);
-         }
+          }
       );
-      _microphone = controller.stream;
+
+      result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort);
+      print("setStreamFinishedCallback: $result");
+      result = PortAudio.startStream(stream);
+      print("startStream: $result");
+
+       _microphone = controller.stream;
+
+
       receivePort.listen((message) {
         final translatedMessage = MessageTranslator(message);
         final messageType = translatedMessage.messageType;
