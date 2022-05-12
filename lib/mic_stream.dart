@@ -154,7 +154,6 @@ class MicStream {
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
             StreamFlags.noFlag, receivePort.sendPort, nullptr);
-        result = -1;
         if(result < 0){
           final Pointer<PaWasapiStreamInfo> wp = calloc<PaWasapiStreamInfo>();
           wp.ref.size = sizeOf<IntPtr>() == 8 ? 56 : 48;     ///size of struct by OS arch
