@@ -138,21 +138,42 @@ class MicStream {
             bufferSize, receivePort.sendPort, nullptr);
       }
       else {
-        final Pointer<StreamParameters> p = calloc<StreamParameters>();
+
         var index = int.parse(uid);
         var inputDeviceInfo = PortAudio.getDeviceInfo(index);
         sampleRateCompleter.complete(inputDeviceInfo.defaultSampleRate.toDouble());
         bitDepthCompleter.complete(2048);
         bufferSizeCompleter.complete(bufferSize);
+        ///Initializing C structures
+        final Pointer<StreamParameters> p = calloc<StreamParameters>();
         p.ref.device = index;
         p.ref.channelCount = 1;
         p.ref.sampleFormat = SampleFormat.int16;
         p.ref.suggestedLatency = inputDeviceInfo.defaultLowInputLatency;
         p.ref.hostApiSpecificStreamInfo = nullptr;
-        print(inputDeviceInfo.defaultSampleRate);
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
             StreamFlags.noFlag, receivePort.sendPort, nullptr);
+        result = -1;
+        if(result < 0){
+          final Pointer<PaWasapiStreamInfo> wp = calloc<PaWasapiStreamInfo>();
+          wp.ref.size = sizeOf<IntPtr>() == 8 ? 56 : 48;     ///size of struct by OS arch
+          wp.ref.hostApiType = 13;                           ///Predefined in PortAudio
+          wp.ref.version = 1;                                ///Predefined in PortAudio
+          wp.ref.flags = 1 | 16;                             ///Exclusive mode with threadPriority
+          wp.ref.threadPriority = 6;
+          p.ref.hostApiSpecificStreamInfo = wp.cast<Void>(); ///cast to void* C type
+          result = PortAudio.openStream(stream, p, nullptr,
+              inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
+              StreamFlags.noFlag, receivePort.sendPort, nullptr);
+        }
+
+
+        if(result < 0){
+          print(PortAudio.getErrorText(result));
+        }
+        //calloc.free(wp);
+        //calloc.free(p);
       }
       StreamController<Uint8List> controller;
       controller = StreamController<Uint8List>.broadcast(onListen: () async {},

@@ -1751,3 +1751,47 @@ class StreamInfo extends Struct {
   @Double()
   external double sampleRate;
 }
+
+
+class PaWasapiStreamInfo extends Struct {
+  // this is struct version 1
+  @Int32()
+  external int size;
+
+  ///13 = WASAPI
+  @Int32()
+  external int hostApiType;
+
+  /// = 1
+  @Int32()
+  external int version;
+
+  /// collection of PaWasapiFlags */
+  @Int32()
+  external int flags;
+  /** Support for WAVEFORMATEXTENSIBLE channel masks. If flags contains
+      paWinWasapiUseChannelMask this allows you to specify which speakers
+      to address in a multichannel stream. Constants for channelMask
+      are specified in pa_win_waveformat.h. Will be used only if
+      paWinWasapiUseChannelMask flag is specified.
+   */
+  @Int32()
+  external int channelMask;
+
+  /** Delivers raw data to callback obtained from GetBuffer() methods skipping
+      internal PortAudio processing inventory completely. userData parameter will
+      be the same that was passed to Pa_OpenStream method. Will be used only if
+      paWinWasapiRedirectHostProcessor flag is specified.
+   */
+  external Pointer<IntPtr> hostProcessorOutput;
+  external Pointer<IntPtr> hostProcessorInput;
+  /** Specifies thread priority explicitly. Will be used only if paWinWasapiThreadPriority flag
+      is specified.
+
+      Please note, if Input/Output streams are opened simultaneously (Full-Duplex mode)
+      you shall specify same value for threadPriority or othervise one of the values will be used
+      to setup thread priority.
+   */
+  @Int32()
+  external int threadPriority;
+}
