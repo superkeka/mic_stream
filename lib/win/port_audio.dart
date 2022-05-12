@@ -73,7 +73,7 @@ class PortAudio {
   static void Function(int)? _PaSleep;
 
   // Port Audio Helper Library
-  static Pointer<NativeFunction<StreamCallback>> Function(int)? _PahGetStreamCallback;
+  static Pointer<NativeFunction<StreamCallback>> Function(int)? PahGetStreamCallback;
   static void Function(int)? _PahSetStreamResult;
   static Pointer<NativeFunction<StreamFinishedCallback>> Function(int)? _PahGetStreamFinishedCallback;
 
@@ -321,7 +321,7 @@ class PortAudio {
     print(pahPath);
     final pahLib = DynamicLibrary.open(pahPath!);
 
-    _PahGetStreamCallback = pahLib
+    PahGetStreamCallback = pahLib
         .lookup<NativeFunction<Pointer<NativeFunction<StreamCallback>> Function(Int64)>>('Pah_GetStreamCallback')
         .asFunction();
 
@@ -753,8 +753,7 @@ class PortAudio {
 
     Pointer<NativeFunction<StreamCallback>> streamCallback = nullptr;
     if (sendPort != null) {
-      streamCallback = _PahGetStreamCallback!(sendPort.nativePort);
-
+      streamCallback = PahGetStreamCallback!(sendPort.nativePort);
     }
 
     return _PaOpenStream!(
@@ -815,7 +814,7 @@ class PortAudio {
     if (sendPort != null) {
       var nt = sendPort.nativePort;
       print ("native port $nt");
-      streamCallback = _PahGetStreamCallback!(sendPort.nativePort);
+      streamCallback = PahGetStreamCallback!(sendPort.nativePort);
 
       print ("streamCallback ${streamCallback}");
     } else {
@@ -1754,18 +1753,14 @@ class StreamInfo extends Struct {
 
 
 class PaWasapiStreamInfo extends Struct {
-  // this is struct version 1
   @Int32()
   external int size;
-
   ///13 = WASAPI
   @Int32()
   external int hostApiType;
-
   /// = 1
   @Int32()
   external int version;
-
   /// collection of PaWasapiFlags */
   @Int32()
   external int flags;
@@ -1783,15 +1778,23 @@ class PaWasapiStreamInfo extends Struct {
       be the same that was passed to Pa_OpenStream method. Will be used only if
       paWinWasapiRedirectHostProcessor flag is specified.
    */
-  external Pointer<IntPtr> hostProcessorOutput;
-  external Pointer<IntPtr> hostProcessorInput;
+  @Int64()
+  external int hostProcessorOutput;
+  @Int64()
+  external int hostProcessorInput;
+  //external Pointer<NativeFunction<StreamCallback>> hostProcessorOutput;
+  //external Pointer<NativeFunction<StreamCallback>> hostProcessorInput;
   /** Specifies thread priority explicitly. Will be used only if paWinWasapiThreadPriority flag
       is specified.
 
       Please note, if Input/Output streams are opened simultaneously (Full-Duplex mode)
       you shall specify same value for threadPriority or othervise one of the values will be used
       to setup thread priority.
-   */
+  */
   @Int32()
   external int threadPriority;
+  @Int32()
+  external int streamCategory;
+  @Int32()
+  external int streamOption;
 }

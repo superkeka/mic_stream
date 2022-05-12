@@ -114,7 +114,6 @@ class MicStream {
     // sampleRate/bitDepth should be populated before any attempt to consume the stream externally.
     // configure these as Completers and listen to the stream internally before returning
     // these will complete only when this internal listener is called
-
     StreamSubscription<Uint8List>? listener;
     var sampleRateCompleter = new Completer<double>();
     var bitDepthCompleter = new Completer<int>();
@@ -123,6 +122,7 @@ class MicStream {
     _bitDepth = bitDepthCompleter.future;
     _bufferSize = bufferSizeCompleter.future;
     if(Platform.isWindows){
+      final Pointer<StreamParameters> p = calloc<StreamParameters>();
       const int bufferSize = 256;
       var receivePort = ReceivePort();
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
@@ -138,52 +138,48 @@ class MicStream {
             bufferSize, receivePort.sendPort, nullptr);
       }
       else {
-
         var index = int.parse(uid);
         var inputDeviceInfo = PortAudio.getDeviceInfo(index);
         sampleRateCompleter.complete(inputDeviceInfo.defaultSampleRate.toDouble());
         bitDepthCompleter.complete(2048);
         bufferSizeCompleter.complete(bufferSize);
-        ///Initializing C structures
-        final Pointer<StreamParameters> p = calloc<StreamParameters>();
         p.ref.device = index;
         p.ref.channelCount = 1;
         p.ref.sampleFormat = SampleFormat.int16;
         p.ref.suggestedLatency = inputDeviceInfo.defaultLowInputLatency;
-        p.ref.hostApiSpecificStreamInfo = nullptr;
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
             StreamFlags.noFlag, receivePort.sendPort, nullptr);
-        result = -1;
+        /*
         if(result < 0){
           final Pointer<PaWasapiStreamInfo> wp = calloc<PaWasapiStreamInfo>();
           wp.ref.size = sizeOf<IntPtr>() == 8 ? 56 : 48;     ///size of struct by OS arch
           wp.ref.hostApiType = 13;                           ///Predefined in PortAudio
           wp.ref.version = 1;                                ///Predefined in PortAudio
-          wp.ref.flags = 1 | 16;                             ///Exclusive mode with threadPriority
-          wp.ref.threadPriority = 6;
+          wp.ref.flags = (1 | 8);                            ///Exclusive mode with threadPriority
+          wp.ref.threadPriority = 2;
+          wp.ref.channelMask = 0x3;
           p.ref.hostApiSpecificStreamInfo = wp.cast<Void>(); ///cast to void* C type
           result = PortAudio.openStream(stream, p, nullptr,
               inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
-              StreamFlags.noFlag, receivePort.sendPort, nullptr);
+              StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
         }
-
+        */
 
         if(result < 0){
-          print(PortAudio.getErrorText(result));
+          var err = PortAudio.getErrorText(result);
+          throw Exception(err);
         }
-        //calloc.free(wp);
-        //calloc.free(p);
       }
       StreamController<Uint8List> controller;
-      controller = StreamController<Uint8List>.broadcast(onListen: () async {},
+      controller = StreamController<Uint8List>.broadcast(
           onCancel: (){
             if(result == 0){
               PortAudio.stopStream(stream);
-              //PortAudio.closeStream(stream);
+              PortAudio.closeStream(stream);
+              malloc.free(stream);
+              calloc.free(p);
             }
-            //malloc.free(stream.value);
-            //malloc.free(stream);
           }
       );
 
@@ -192,9 +188,7 @@ class MicStream {
       result = PortAudio.startStream(stream);
       print("startStream: $result");
 
-       _microphone = controller.stream;
-
-
+      _microphone = controller.stream;
       receivePort.listen((message) {
         final translatedMessage = MessageTranslator(message);
         final messageType = translatedMessage.messageType;
