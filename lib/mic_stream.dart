@@ -127,6 +127,7 @@ class MicStream {
       var receivePort = ReceivePort();
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
       int result = 0;
+      uid = "6";
       if(uid == ""){
         var inputDevice = PortAudio.getDefaultInputDevice();
         var inputDeviceInfo = PortAudio.getDeviceInfo(inputDevice);
