@@ -127,6 +127,7 @@ class MicStream {
       var receivePort = ReceivePort();
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
       int result = 0;
+      uid = "6";
       if(uid == ""){
         var inputDevice = PortAudio.getDefaultInputDevice();
         var inputDeviceInfo = PortAudio.getDeviceInfo(inputDevice);
@@ -146,47 +147,44 @@ class MicStream {
         p.ref.device = index;
         p.ref.channelCount = 1;
         p.ref.sampleFormat = SampleFormat.int16;
-        p.ref.suggestedLatency = inputDeviceInfo.defaultLowInputLatency;
+        if(inputDeviceInfo != nullptr){
+          p.ref.suggestedLatency = inputDeviceInfo.defaultLowInputLatency;
+        }
+        else {
+          p.ref.suggestedLatency = -130.0 / 1000.0;
+        }
+
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
-            StreamFlags.noFlag, receivePort.sendPort, nullptr);
-        /*
-        if(result < 0){
-          final Pointer<PaWasapiStreamInfo> wp = calloc<PaWasapiStreamInfo>();
-          wp.ref.size = sizeOf<IntPtr>() == 8 ? 56 : 48;     ///size of struct by OS arch
-          wp.ref.hostApiType = 13;                           ///Predefined in PortAudio
-          wp.ref.version = 1;                                ///Predefined in PortAudio
-          wp.ref.flags = (1 | 8);                            ///Exclusive mode with threadPriority
-          wp.ref.threadPriority = 2;
-          wp.ref.channelMask = 0x3;
-          p.ref.hostApiSpecificStreamInfo = wp.cast<Void>(); ///cast to void* C type
-          result = PortAudio.openStream(stream, p, nullptr,
-              inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
-              StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
-        }
-        */
-
-        if(result < 0){
-          var err = PortAudio.getErrorText(result);
-          throw Exception(err);
-        }
+            StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
+      }
+      if(result < 0){
+        var err = PortAudio.getErrorText(result);
+        throw Exception(err);
       }
       StreamController<Uint8List> controller;
       controller = StreamController<Uint8List>.broadcast(
           onCancel: (){
             if(result == 0){
-              PortAudio.stopStream(stream);
-              PortAudio.closeStream(stream);
-              malloc.free(stream);
-              calloc.free(p);
+              Future.value((){
+                result = PortAudio.stopStream(stream);
+                if(result < 0){
+                  throw Exception("Error stop stream: ${PortAudio.getErrorText(result)}");
+                }
+                PortAudio.closeStream(stream);
+                if(result < 0){
+                  throw Exception("Error close stream: ${PortAudio.getErrorText(result)}");
+                }
+                malloc.free(stream);
+                calloc.free(p);
+                return result;
+              }).then((value) => print("stop: $value"));
             }
           }
       );
 
       result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort);
-      print("setStreamFinishedCallback: $result");
       result = PortAudio.startStream(stream);
-      print("startStream: $result");
 
       _microphone = controller.stream;
       receivePort.listen((message) {
