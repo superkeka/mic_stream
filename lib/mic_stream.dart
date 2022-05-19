@@ -126,6 +126,7 @@ class MicStream {
       const int bufferSize = 256;
       var receivePort = ReceivePort();
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
+      var inputChannelsCount = 1;
       int result = 0;
       if(uid == ""){
         var inputDevice = PortAudio.getDefaultInputDevice();
@@ -133,7 +134,7 @@ class MicStream {
         sampleRateCompleter.complete(inputDeviceInfo.defaultSampleRate.toDouble());
         bitDepthCompleter.complete(2048);
         bufferSizeCompleter.complete(bufferSize);
-        result = PortAudio.openDefaultStream(stream, 1, 0,
+        result = PortAudio.openDefaultStream(stream, inputChannelsCount, 0,
             SampleFormat.int16, sampleRate.toDouble(),
             bufferSize, receivePort.sendPort, nullptr);
       }
@@ -144,7 +145,7 @@ class MicStream {
         bitDepthCompleter.complete(2048);
         bufferSizeCompleter.complete(bufferSize);
         p.ref.device = index;
-        p.ref.channelCount = 1;
+        p.ref.channelCount = inputChannelsCount;
         p.ref.sampleFormat = SampleFormat.int16;
         if(inputDeviceInfo != nullptr){
           p.ref.suggestedLatency = inputDeviceInfo.defaultLowInputLatency;
@@ -156,10 +157,21 @@ class MicStream {
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
             StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
+        if(result == -9996){
+          //WASAPI BUG WITH MONO
+          p.ref.channelCount = inputDeviceInfo.maxInputChannels;
+          inputChannelsCount = inputDeviceInfo.maxInputChannels;
+          result = PortAudio.openStream(stream, p, nullptr,
+              inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
+              StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
+        }
       }
       if(result < 0){
         var err = PortAudio.getErrorText(result);
-        throw Exception(err);
+        throw Exception("$err Code: $result Channels: ${inputChannelsCount}");
+      }
+      if(inputChannelsCount > 2){
+        throw Exception("inputChannelsCount > 2 is not supported");
       }
       StreamController<Uint8List> controller;
       controller = StreamController<Uint8List>.broadcast(
@@ -189,11 +201,19 @@ class MicStream {
       receivePort.listen((message) {
         final translatedMessage = MessageTranslator(message);
         final messageType = translatedMessage.messageType;
-        final outputPointer = translatedMessage.inputPointer?.cast<Int16>();
         final frameCount = translatedMessage.frameCount;
         var byteData = ByteData(sizeOf<Int16>()*bufferSize);
-        for(var i = 0; messageType == MessageTranslator.messageTypeCallback && i < frameCount!; i++) {
-          byteData.setInt16(i*sizeOf<Int16>(), outputPointer![i], Endian.little);
+        if(inputChannelsCount == 2){
+          final outputPointer = translatedMessage.inputPointer?.cast<Int32>();
+          for(var i = 0; messageType == MessageTranslator.messageTypeCallback && i < frameCount!; i++) {
+            byteData.setInt16(i*(sizeOf<Int16>()), outputPointer![i], Endian.little);
+          }
+        }
+        else if(inputChannelsCount == 1){
+          final outputPointer = translatedMessage.inputPointer?.cast<Int16>();
+          for(var i = 0; messageType == MessageTranslator.messageTypeCallback && i < frameCount!; i++) {
+            byteData.setInt16(i*(sizeOf<Int16>()), outputPointer![i], Endian.little);
+          }
         }
         var bytes = byteData.buffer.asUint8List();
         controller.add(bytes);
