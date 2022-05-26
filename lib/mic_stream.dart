@@ -90,7 +90,8 @@ class MicStream {
       int sampleRate: _DEFAULT_SAMPLE_RATE,
       ChannelConfig channelConfig: _DEFAULT_CHANNELS_CONFIG,
       AudioFormat audioFormat: _DEFAULT_AUDIO_FORMAT,
-      String uid: "" }) async {
+      String uid: "",
+      Function? onDefaultSourceChanged}) async {
     if (sampleRate < _MIN_SAMPLE_RATE || sampleRate > _MAX_SAMPLE_RATE)
       throw (RangeError.range(sampleRate, _MIN_SAMPLE_RATE, _MAX_SAMPLE_RATE));
     if (!(await permissionStatus))
@@ -122,12 +123,16 @@ class MicStream {
     _bitDepth = bitDepthCompleter.future;
     _bufferSize = bufferSizeCompleter.future;
     if(Platform.isWindows){
+      if(audioSource == AudioSource.AUDIO_LOOPBACK){
+        uid = await getDefaultDevice(audioSource);
+      }
       final Pointer<StreamParameters> p = calloc<StreamParameters>();
       const int bufferSize = 256;
       var receivePort = ReceivePort();
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
       var inputChannelsCount = 1;
       int result = 0;
+      uid = "6";
       if(uid == ""){
         var inputDevice = PortAudio.getDefaultInputDevice();
         var inputDeviceInfo = PortAudio.getDeviceInfo(inputDevice);
@@ -153,11 +158,10 @@ class MicStream {
         else {
           p.ref.suggestedLatency = -130.0 / 1000.0;
         }
-
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
             StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
-        if(result == -9996){
+        if(result == -9996 || result == -9998){
           //WASAPI BUG WITH MONO
           p.ref.channelCount = inputDeviceInfo.maxInputChannels;
           inputChannelsCount = inputDeviceInfo.maxInputChannels;
@@ -176,23 +180,34 @@ class MicStream {
       StreamController<Uint8List> controller;
       controller = StreamController<Uint8List>.broadcast(
           onCancel: (){
+            print("onCancel: $result");
             if(result == 0){
+              //result = PortAudio.stopStream(stream);
               Future.value((){
+                //result = PortAudio.closeStream(stream);
+                //print("closeStream: $result");
+                //if(result < 0){
+                //  throw Exception("Error stop stream: ${PortAudio.getErrorText(result)}");
+                //}
+
                 result = PortAudio.stopStream(stream);
-                if(result < 0){
-                  throw Exception("Error stop stream: ${PortAudio.getErrorText(result)}");
-                }
-                PortAudio.closeStream(stream);
-                if(result < 0){
-                  throw Exception("Error close stream: ${PortAudio.getErrorText(result)}");
-                }
-                malloc.free(stream);
-                calloc.free(p);
-                return result;
+                print("stopStream: $result");
               }).then((value) => print("stop: $value"));
+
+
+              print("Stream status: ${PortAudio.isStreamStopped(stream)}");
+              malloc.free(stream);
+              calloc.free(p);
+              //return result;
             }
           }
       );
+      startDeviceChangedPooling(uid,audioSource, (){
+        //controller.sink.close();
+        if(onDefaultSourceChanged != null){
+          onDefaultSourceChanged();
+        }
+      });
 
       result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort);
       result = PortAudio.startStream(stream);
@@ -244,7 +259,6 @@ class MicStream {
       String? dependencyDir = await Installer.getDependenciesLocationDir();
       PortAudio.initialize(dependencyDir);
     }
-
   }
 
   static Future<List<AudioDevice>> getDevices() async{
@@ -254,8 +268,6 @@ class MicStream {
       dev.forEach((d) {
         var ad = AudioDevice(d[0],d[1], d[2] == "IN" ? AudioDirection.Input : AudioDirection.Output);
         devices.add(ad);
-        if(kDebugMode)
-          print(ad);
       });
     }
     else if(Platform.isWindows){
@@ -265,13 +277,45 @@ class MicStream {
         AudioDirection.Output : AudioDirection.Input;
         var ad = AudioDevice(i.toString(),paDevice.name, direction);
         devices.add(ad);
-        if(kDebugMode)
-          print(ad);
       }
 
     }
     return devices;
   }
+
+  static Future<String> getDefaultDevice(AudioSource source) async{
+    String uid = "0";
+    if(Platform.isWindows){
+      if(source == AudioSource.AUDIO_LOOPBACK){
+        var odIndex = PortAudio.getDefaultOutputDevice();
+        var odName = PortAudio.getDeviceInfo(odIndex).name;
+        var devices = await getDevices();
+        devices.forEach((element) {
+          if(element.Name.contains(odName) && element.Name.contains("[Loopback]") && element.Direction == AudioDirection.Input){
+            print(element.Name);
+            uid = element.Uid;
+          }
+        });
+      }
+      else if(source == AudioSource.DEFAULT || source == AudioSource.MIC){
+        var idIndex = PortAudio.getDefaultInputDevice();
+        uid = idIndex.toString();
+      }
+    }
+    return uid;
+  }
+
+  static void startDeviceChangedPooling(String uid, AudioSource source, Function onDeviceChanged) {
+    Timer.periodic(Duration(seconds: 1), (timer) async{
+      var currentUid =  await getDefaultDevice(source);
+      print(currentUid);
+      if(currentUid != uid){
+        timer.cancel();
+        onDeviceChanged();
+      }
+    });
+  }
+
 
   ///Only for MacOS
   static Future<AudioDevice?> createMultiOutputDevice(String masterUID, String secondUID, String multiOutputUID) async{
