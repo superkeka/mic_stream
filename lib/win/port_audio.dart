@@ -26,6 +26,7 @@ class PortAudio {
   static int Function()? _PaTerminate;
   static int Function()? _PaGetHostApiCount;
   static int Function()? _PaGetDefaultHostApi;
+  static int Function()? _PaRefreshDeviceList;
   static Pointer<HostApiInfo> Function(int)? _PaGetHostApiInfo;
   static int Function(int)? _PaHostApiTypeIdToHostApiIndex;
   static int Function(int, int)? _PaHostApiDeviceIndexToDeviceIndex;
@@ -57,6 +58,8 @@ class PortAudio {
   static int Function(Pointer<Void>)? _PaCloseStream;
   static int Function(Pointer<Void>, Pointer<NativeFunction<StreamFinishedCallback>>)?
   _PaSetStreamFinishedCallback;
+  static int Function(Pointer<Void>, Pointer<NativeFunction<StreamFinishedCallback>>)?
+  _PaSetDevicesChangedCallback;
   static int Function(Pointer<Void>)? _PaStartStream;
   static int Function(Pointer<Void>)? _PaStopStream;
   static int Function(Pointer<Void>)? _PaAbortStream;
@@ -76,6 +79,8 @@ class PortAudio {
   static Pointer<NativeFunction<StreamCallback>> Function(int)? PahGetStreamCallback;
   static void Function(int)? _PahSetStreamResult;
   static Pointer<NativeFunction<StreamFinishedCallback>> Function(int)? _PahGetStreamFinishedCallback;
+  static Pointer<Utf8> Function()? _PahGetDefaultInputDevice;
+  static Pointer<Utf8> Function()? _PahGetDefaultOutputDevice;
 
   ///
   /// Contructor loads the library and looks up functions
@@ -117,12 +122,12 @@ class PortAudio {
         .lookup<NativeFunction<Pointer<Utf8> Function()>>(
         'Pa_GetVersionText')
         .asFunction();
-
+/*
     _PaGetVersionInfo = paLib
         .lookup<NativeFunction<Pointer<VersionInfo> Function()>>(
         'Pa_GetVersionInfo')
         .asFunction();
-
+*/
     _PaGetErrorText = paLib
         .lookup<NativeFunction<Pointer<Utf8> Function(Int32)>>(
         'Pa_GetErrorText')
@@ -132,11 +137,13 @@ class PortAudio {
         .lookup<NativeFunction<Int32 Function()>>('Pa_Initialize')
         .asFunction();
 
-
     _PaTerminate = paLib
         .lookup<NativeFunction<Int32 Function()>>('Pa_Terminate')
         .asFunction();
 
+    _PaRefreshDeviceList = paLib
+        .lookup<NativeFunction<Int32 Function()>>('Pa_RefreshDevices')
+        .asFunction();
 
     _PaGetHostApiCount = paLib
         .lookup<NativeFunction<Int32 Function()>>('Pa_GetHostApiCount')
@@ -230,6 +237,14 @@ class PortAudio {
             Int32 Function(Pointer<Void>,
                 Pointer<NativeFunction<StreamFinishedCallback>>)>>(
         'Pa_SetStreamFinishedCallback')
+        .asFunction();
+
+    _PaSetDevicesChangedCallback = paLib
+        .lookup<
+        NativeFunction<
+            Int32 Function(Pointer<Void>,
+                Pointer<NativeFunction<StreamFinishedCallback>>)>>(
+        'Pa_SetDevicesChangedCallback')
         .asFunction();
 
     _PaStartStream = paLib
@@ -336,6 +351,12 @@ class PortAudio {
     _PahInit = pahLib.lookup<NativeFunction<IntPtr Function(Pointer<Void>)>>("Pah_InitDartApiDL")
         .asFunction();
 
+    _PahGetDefaultInputDevice  = pahLib.lookup<NativeFunction<Pointer<Utf8> Function()>>("Pah_GetDefaultInputDevice")
+    .asFunction();
+
+    _PahGetDefaultOutputDevice = pahLib.lookup<NativeFunction<Pointer<Utf8> Function()>>("Pah_GetDefaultOutputDevice")
+        .asFunction();
+
     _loaded = true;
   }
 
@@ -436,6 +457,13 @@ class PortAudio {
     return _PaInitialize!();
   }
 
+  static int refreshDeviceList(){
+    if (! _loaded) {
+      _load();
+    }
+
+    return _PaRefreshDeviceList!();
+  }
   /// Library termination function - call this when finished using PortAudio.
   /// This function deallocates all resources allocated by PortAudio since it was
   /// initialized by a call to Initialize(). In cases where Initialise() has
@@ -890,6 +918,22 @@ class PortAudio {
         stream.value, streamFinishedCallback);
   }
 
+  static int setDeviceChangedCallback(Pointer<Pointer<Void>> stream,
+      SendPort sendPort) {
+    if (! _loaded) {
+      _load();
+    }
+
+    var streamFinishedCallback;
+    if (sendPort != null) {
+      streamFinishedCallback = _PahGetStreamFinishedCallback!(sendPort.nativePort);
+    } else {
+      streamFinishedCallback = nullptr;
+    }
+    return _PaSetDevicesChangedCallback!(
+        nullptr, streamFinishedCallback);
+  }
+
   ///
   /// Commences audio processing.
   ///
@@ -1155,6 +1199,23 @@ class PortAudio {
     }
 
     _PaSleep!(msec);
+  }
+
+  static String  PahGetDefaultInputDevice() {
+    if (! _loaded) {
+      _load();
+    }
+    var textPtr =  _PahGetDefaultInputDevice!();
+    return textPtr.toDartString();
+  }
+
+  static String PahGetDefaultOutputDevice() {
+    if (! _loaded) {
+      _load();
+    }
+
+    var textPtr =  _PahGetDefaultOutputDevice!();
+    return textPtr.toDartString();
   }
 }
 

@@ -123,7 +123,9 @@ class MicStream {
     _bitDepth = bitDepthCompleter.future;
     _bufferSize = bufferSizeCompleter.future;
     if(Platform.isWindows){
-      if(audioSource == AudioSource.AUDIO_LOOPBACK){
+      if( audioSource == AudioSource.AUDIO_LOOPBACK ||
+          audioSource == AudioSource.DEFAULT ||
+          audioSource == AudioSource.MIC && uid == ""){
         uid = await getDefaultDevice(audioSource);
       }
       final Pointer<StreamParameters> p = calloc<StreamParameters>();
@@ -132,7 +134,6 @@ class MicStream {
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
       var inputChannelsCount = 1;
       int result = 0;
-      uid = "6";
       if(uid == ""){
         var inputDevice = PortAudio.getDefaultInputDevice();
         var inputDeviceInfo = PortAudio.getDeviceInfo(inputDevice);
@@ -170,6 +171,8 @@ class MicStream {
               StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
         }
       }
+      result = PortAudio.setDeviceChangedCallback(nullptr, receivePort.sendPort);
+      print("setDeviceChangedCallback ${result}");
       if(result < 0){
         var err = PortAudio.getErrorText(result);
         throw Exception("$err Code: $result Channels: ${inputChannelsCount}");
@@ -182,27 +185,16 @@ class MicStream {
           onCancel: (){
             print("onCancel: $result");
             if(result == 0){
-              //result = PortAudio.stopStream(stream);
-              Future.value((){
-                //result = PortAudio.closeStream(stream);
-                //print("closeStream: $result");
-                //if(result < 0){
-                //  throw Exception("Error stop stream: ${PortAudio.getErrorText(result)}");
-                //}
-
-                result = PortAudio.stopStream(stream);
-                print("stopStream: $result");
-              }).then((value) => print("stop: $value"));
-
-
+              result = PortAudio.abortStream(stream);
+              print("stopStream: $result");
               print("Stream status: ${PortAudio.isStreamStopped(stream)}");
-              malloc.free(stream);
-              calloc.free(p);
-              //return result;
+              //malloc.free(stream);
+              //calloc.free(p);
             }
           }
       );
-      startDeviceChangedPooling(uid,audioSource, (){
+      //int r = PortAudio.refreshDeviceList();
+      startDeviceChangedPooling(uid,audioSource, stream,(){
         //controller.sink.close();
         if(onDefaultSourceChanged != null){
           onDefaultSourceChanged();
@@ -216,6 +208,9 @@ class MicStream {
       receivePort.listen((message) {
         final translatedMessage = MessageTranslator(message);
         final messageType = translatedMessage.messageType;
+        if(messageType == 0){
+          print("Stream stop");
+        }
         final frameCount = translatedMessage.frameCount;
         var byteData = ByteData(sizeOf<Int16>()*bufferSize);
         if(inputChannelsCount == 2){
@@ -286,29 +281,43 @@ class MicStream {
   static Future<String> getDefaultDevice(AudioSource source) async{
     String uid = "0";
     if(Platform.isWindows){
+      var result = PortAudio.refreshDeviceList();
       if(source == AudioSource.AUDIO_LOOPBACK){
-        var odIndex = PortAudio.getDefaultOutputDevice();
-        var odName = PortAudio.getDeviceInfo(odIndex).name;
+        var odName = PortAudio.PahGetDefaultOutputDevice();
+        print(odName);
         var devices = await getDevices();
-        devices.forEach((element) {
+        for(final element in devices){
           if(element.Name.contains(odName) && element.Name.contains("[Loopback]") && element.Direction == AudioDirection.Input){
-            print(element.Name);
             uid = element.Uid;
+            break;
           }
-        });
+        }
       }
       else if(source == AudioSource.DEFAULT || source == AudioSource.MIC){
-        var idIndex = PortAudio.getDefaultInputDevice();
-        uid = idIndex.toString();
+        var odName = PortAudio.PahGetDefaultInputDevice();
+        print(odName);
+        var devices = await getDevices();
+        devices.forEach((element) {
+          for(final element in devices){
+            if(element.Name.contains(odName)  && element.Direction == AudioDirection.Input){
+              uid = element.Uid;
+              break;
+            }
+          }
+        });
+
       }
     }
     return uid;
   }
 
-  static void startDeviceChangedPooling(String uid, AudioSource source, Function onDeviceChanged) {
-    Timer.periodic(Duration(seconds: 1), (timer) async{
+  static void startDeviceChangedPooling(String uid, AudioSource source, Pointer<Pointer<Void>> stream, Function onDeviceChanged) {
+    Timer.periodic(Duration(seconds: 5), (timer) async{
+      var streamStatus = PortAudio.isStreamStopped(stream);
+      if(streamStatus == 1){
+        timer.cancel();
+      }
       var currentUid =  await getDefaultDevice(source);
-      print(currentUid);
       if(currentUid != uid){
         timer.cancel();
         onDeviceChanged();
@@ -343,7 +352,7 @@ class MicStream {
     if (Platform.isMacOS) {
       await _microphoneMethodChannel.invokeMethod(
           "destroyMultiOutputDevice", <String, dynamic>{
-        'multiOutUID': "",
+          'multiOutUID': "",
       });
     }
   }

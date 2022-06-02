@@ -95,7 +95,7 @@ class _MicStreamExampleAppState extends State<MicStreamExampleApp>
       await MicStream.createMultiOutputDevice("BuiltInSpeakerDevice", "BlackHole2ch_UID", "InturoDesktop_UID");
     }
     stream = await MicStream.microphone(
-        audioSource: AudioSource.DEFAULT,
+        audioSource: AudioSource.AUDIO_LOOPBACK,
         sampleRate: 44100,
         channelConfig: ChannelConfig.CHANNEL_IN_MONO,
         audioFormat: AUDIO_FORMAT,
