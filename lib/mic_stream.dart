@@ -181,12 +181,14 @@ class MicStream {
       if(inputChannelsCount > 2){
         throw Exception("inputChannelsCount > 2 is not supported");
       }
+      bool closeRequest = false;
       StreamController<Uint8List> controller;
       controller = StreamController<Uint8List>.broadcast(
           onCancel: (){
             print("onCancel: $result");
             if(result == 0){
-              result = PortAudio.abortStream(stream);
+              closeRequest = true;
+              //result = PortAudio.abortStream(stream);
               print("stopStream: $result");
               print("Stream status: ${PortAudio.isStreamStopped(stream)}");
               //malloc.free(stream);
@@ -228,8 +230,13 @@ class MicStream {
         }
         var bytes = byteData.buffer.asUint8List();
         controller.add(bytes);
+        if(!closeRequest){
+          PortAudio.setStreamResult(StreamCallbackResult.continueProcessing);
+        }
+        else {
+          PortAudio.setStreamResult(2);
+        }
 
-        PortAudio.setStreamResult(StreamCallbackResult.continueProcessing);
       });
       return _microphone;
     }
