@@ -79,8 +79,8 @@ class PortAudio {
   static Pointer<NativeFunction<StreamCallback>> Function(int)? PahGetStreamCallback;
   static void Function(int)? _PahSetStreamResult;
   static Pointer<NativeFunction<StreamFinishedCallback>> Function(int)? _PahGetStreamFinishedCallback;
-  static Pointer<Utf8> Function()? _PahGetDefaultInputDevice;
-  static Pointer<Utf8> Function()? _PahGetDefaultOutputDevice;
+  static Pointer<Utf16> Function()? _PahGetDefaultInputDevice;
+  static Pointer<Utf16> Function()? _PahGetDefaultOutputDevice;
 
   ///
   /// Contructor loads the library and looks up functions
@@ -351,10 +351,10 @@ class PortAudio {
     _PahInit = pahLib.lookup<NativeFunction<IntPtr Function(Pointer<Void>)>>("Pah_InitDartApiDL")
         .asFunction();
 
-    _PahGetDefaultInputDevice  = pahLib.lookup<NativeFunction<Pointer<Utf8> Function()>>("Pah_GetDefaultInputDevice")
+    _PahGetDefaultInputDevice  = pahLib.lookup<NativeFunction<Pointer<Utf16> Function()>>("Pah_GetDefaultInputDevice")
     .asFunction();
 
-    _PahGetDefaultOutputDevice = pahLib.lookup<NativeFunction<Pointer<Utf8> Function()>>("Pah_GetDefaultOutputDevice")
+    _PahGetDefaultOutputDevice = pahLib.lookup<NativeFunction<Pointer<Utf16> Function()>>("Pah_GetDefaultOutputDevice")
         .asFunction();
 
     _loaded = true;

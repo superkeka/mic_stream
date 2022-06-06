@@ -125,7 +125,8 @@ class MicStream {
     if(Platform.isWindows){
       if( audioSource == AudioSource.AUDIO_LOOPBACK ||
           audioSource == AudioSource.DEFAULT ||
-          audioSource == AudioSource.MIC && uid == ""){
+          audioSource == AudioSource.MIC && uid == "")
+      {
         uid = await getDefaultDevice(audioSource);
       }
       final Pointer<StreamParameters> p = calloc<StreamParameters>();
