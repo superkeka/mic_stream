@@ -27,6 +27,7 @@ class PortAudio {
   static int Function()? _PaGetHostApiCount;
   static int Function()? _PaGetDefaultHostApi;
   static int Function()? _PaRefreshDeviceList;
+  static int Function()? _PaWasapiUpdateDeviceList;
   static Pointer<HostApiInfo> Function(int)? _PaGetHostApiInfo;
   static int Function(int)? _PaHostApiTypeIdToHostApiIndex;
   static int Function(int, int)? _PaHostApiDeviceIndexToDeviceIndex;
@@ -143,6 +144,10 @@ class PortAudio {
 
     _PaRefreshDeviceList = paLib
         .lookup<NativeFunction<Int32 Function()>>('Pa_RefreshDevices')
+        .asFunction();
+
+    _PaWasapiUpdateDeviceList = paLib
+        .lookup<NativeFunction<Int32 Function()>>('PaWasapi_UpdateDeviceList')
         .asFunction();
 
     _PaGetHostApiCount = paLib
@@ -464,6 +469,14 @@ class PortAudio {
 
     return _PaRefreshDeviceList!();
   }
+
+  static int refreshDeviceListWasapi(){
+    if (! _loaded) {
+      _load();
+    }
+
+    return _PaWasapiUpdateDeviceList!();
+  }
   /// Library termination function - call this when finished using PortAudio.
   /// This function deallocates all resources allocated by PortAudio since it was
   /// initialized by a call to Initialize(). In cases where Initialise() has
@@ -484,6 +497,8 @@ class PortAudio {
     if (! _loaded) {
       _load();
     }
+    _loaded = false;
+
 
     return _PaTerminate!();
   }
