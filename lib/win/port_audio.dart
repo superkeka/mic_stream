@@ -77,9 +77,9 @@ class PortAudio {
   static void Function(int)? _PaSleep;
 
   // Port Audio Helper Library
-  static Pointer<NativeFunction<StreamCallback>> Function(int)? PahGetStreamCallback;
-  static void Function(int)? _PahSetStreamResult;
-  static Pointer<NativeFunction<StreamFinishedCallback>> Function(int)? _PahGetStreamFinishedCallback;
+  static Pointer<NativeFunction<StreamCallback>> Function(int, int)? PahGetStreamCallback;
+  static void Function(int, int)? _PahSetStreamResult;
+  static Pointer<NativeFunction<StreamFinishedCallback>> Function(int,int)? _PahGetStreamFinishedCallback;
   static Pointer<Utf16> Function()? _PahGetDefaultInputDevice;
   static Pointer<Utf16> Function()? _PahGetDefaultOutputDevice;
 
@@ -342,15 +342,15 @@ class PortAudio {
     final pahLib = DynamicLibrary.open(pahPath!);
 
     PahGetStreamCallback = pahLib
-        .lookup<NativeFunction<Pointer<NativeFunction<StreamCallback>> Function(Int64)>>('Pah_GetStreamCallback')
+        .lookup<NativeFunction<Pointer<NativeFunction<StreamCallback>> Function(Int64, Int32)>>('Pah_GetStreamCallback')
         .asFunction();
 
     _PahSetStreamResult = pahLib
-        .lookup<NativeFunction<Void Function(Int64)>>('Pah_SetStreamResult')
+        .lookup<NativeFunction<Void Function(Int64, Int32)>>('Pah_SetStreamResult')
         .asFunction();
 
     _PahGetStreamFinishedCallback = pahLib
-        .lookup<NativeFunction<Pointer<NativeFunction<StreamFinishedCallback>> Function(Int64)>>('Pah_GetStreamFinishedCallback')
+        .lookup<NativeFunction<Pointer<NativeFunction<StreamFinishedCallback>> Function(Int64,Int32)>>('Pah_GetStreamFinishedCallback')
         .asFunction();
 
     _PahInit = pahLib.lookup<NativeFunction<IntPtr Function(Pointer<Void>)>>("Pah_InitDartApiDL")
@@ -788,7 +788,7 @@ class PortAudio {
       int framesPerBuffer,
       int streamFlags,
       SendPort sendPort,
-      Pointer<Void> userData) {
+      Pointer<Void> userData, int channelNumber) {
 
     if (! _loaded) {
       _load();
@@ -796,7 +796,7 @@ class PortAudio {
 
     Pointer<NativeFunction<StreamCallback>> streamCallback = nullptr;
     if (sendPort != null) {
-      streamCallback = PahGetStreamCallback!(sendPort.nativePort);
+      streamCallback = PahGetStreamCallback!(sendPort.nativePort, channelNumber);
     }
 
     return _PaOpenStream!(
@@ -846,7 +846,7 @@ class PortAudio {
       double sampleRate,
       int framesPerBuffer,
       SendPort sendPort,
-      Pointer<Void> userData) {
+      Pointer<Void> userData, int channelNumber) {
 
     if (! _loaded) {
       _load();
@@ -857,7 +857,7 @@ class PortAudio {
     if (sendPort != null) {
       var nt = sendPort.nativePort;
       print ("native port $nt");
-      streamCallback = PahGetStreamCallback!(sendPort.nativePort);
+      streamCallback = PahGetStreamCallback!(sendPort.nativePort, channelNumber);
 
       print ("streamCallback ${streamCallback}");
     } else {
@@ -879,13 +879,13 @@ class PortAudio {
   ///
   /// Call the return function, passing result code
   ///
-  static void setStreamResult(int result) {
+  static void setStreamResult(int result, int channelNumber) {
 
     if (! _loaded) {
       _load();
     }
 
-    _PahSetStreamResult!(result);
+    _PahSetStreamResult!(result, channelNumber);
   }
 
   ///
@@ -918,14 +918,14 @@ class PortAudio {
   /// of the error.
   ///
   static int setStreamFinishedCallback(Pointer<Pointer<Void>> stream,
-      SendPort sendPort) {
+      SendPort sendPort, int channelNumber) {
     if (! _loaded) {
       _load();
     }
 
     var streamFinishedCallback;
     if (sendPort != null) {
-      streamFinishedCallback = _PahGetStreamFinishedCallback!(sendPort.nativePort);
+      streamFinishedCallback = _PahGetStreamFinishedCallback!(sendPort.nativePort, channelNumber);
     } else {
       streamFinishedCallback = nullptr;
     }
@@ -934,14 +934,14 @@ class PortAudio {
   }
 
   static int setDeviceChangedCallback(Pointer<Pointer<Void>> stream,
-      SendPort sendPort) {
+      SendPort sendPort, int channelNumber) {
     if (! _loaded) {
       _load();
     }
 
     var streamFinishedCallback;
     if (sendPort != null) {
-      streamFinishedCallback = _PahGetStreamFinishedCallback!(sendPort.nativePort);
+      streamFinishedCallback = _PahGetStreamFinishedCallback!(sendPort.nativePort, channelNumber);
     } else {
       streamFinishedCallback = nullptr;
     }

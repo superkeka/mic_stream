@@ -62,8 +62,8 @@ class MicStream {
   static Future<int>? _bufferSize;
   static Future<int>? get bufferSize => _bufferSize;
 
-  /// The configured microphone stream;
-  static Stream<Uint8List>? _microphone;
+  static List<bool> channelsInUse = List.filled(8, false);
+
 
   // This function manages the permission and ensures you're allowed to record audio
   static Future<bool> get permissionStatus async {
@@ -96,7 +96,8 @@ class MicStream {
       throw (RangeError.range(sampleRate, _MIN_SAMPLE_RATE, _MAX_SAMPLE_RATE));
     if (!(await permissionStatus))
       throw (PlatformException);
-
+    /// The configured microphone stream;
+    Stream<Uint8List>? _microphone;
     if(Platform.isMacOS){
       await _microphoneMethodChannel.invokeMethod("setUid",<String, dynamic>{
         'uid': uid,
@@ -137,6 +138,12 @@ class MicStream {
       var stream = Pointer<Pointer<Void>>.fromAddress(malloc<IntPtr>().address);
       var inputChannelsCount = 1;
       int result = 0;
+
+      final pChannelNumberInt = calloc<Int32>();
+      var indexChannel = channelsInUse.indexOf(false);
+      channelsInUse[indexChannel] = true;
+      pChannelNumberInt.value = indexChannel;
+      final pChannelNumber = pChannelNumberInt.cast<Void>();
       if(uid == ""){
         var inputDevice = PortAudio.getDefaultInputDevice();
         var inputDeviceInfo = PortAudio.getDeviceInfo(inputDevice);
@@ -145,7 +152,7 @@ class MicStream {
         bufferSizeCompleter.complete(bufferSize);
         result = PortAudio.openDefaultStream(stream, inputChannelsCount, 0,
             SampleFormat.int16, sampleRate.toDouble(),
-            bufferSize, receivePort.sendPort, nullptr);
+            bufferSize, receivePort.sendPort, pChannelNumber, indexChannel);
       }
       else {
         var index = int.parse(uid);
@@ -164,14 +171,14 @@ class MicStream {
         }
         result = PortAudio.openStream(stream, p, nullptr,
             inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
-            StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
+            StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, pChannelNumber, pChannelNumberInt.value);
         if(result == -9996 || result == -9998){
           //WASAPI BUG WITH MONO
           p.ref.channelCount = inputDeviceInfo.maxInputChannels;
           inputChannelsCount = inputDeviceInfo.maxInputChannels;
           result = PortAudio.openStream(stream, p, nullptr,
               inputDeviceInfo.defaultSampleRate.toDouble(), bufferSize,
-              StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, nullptr);
+              StreamFlags.clipOff | StreamFlags.ditherOff, receivePort.sendPort, pChannelNumber, pChannelNumberInt.value);
         }
       }
 
@@ -189,7 +196,9 @@ class MicStream {
             print("onCancel: $result");
             if(result == 0){
               closeRequest = true;
+
               Future.delayed(Duration(milliseconds: 500),(){
+                channelsInUse[indexChannel] = false;
                 result = PortAudio.abortStream(stream);
                 print("stopStream: $result");
                 print("Stream status: ${PortAudio.isStreamStopped(stream)}");
@@ -204,7 +213,7 @@ class MicStream {
         }
       });
 
-      result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort);
+      result = PortAudio.setStreamFinishedCallback(stream, receivePort.sendPort, pChannelNumberInt.value);
       result = PortAudio.startStream(stream);
 
       _microphone = controller.stream;
@@ -239,10 +248,10 @@ class MicStream {
         var bytes = byteData.buffer.asUint8List();
         controller.add(bytes);
         if(!closeRequest){
-          PortAudio.setStreamResult(StreamCallbackResult.continueProcessing);
+          PortAudio.setStreamResult(StreamCallbackResult.continueProcessing, pChannelNumberInt.value);
         }
         else {
-          PortAudio.setStreamResult(2);
+          PortAudio.setStreamResult(2, pChannelNumberInt.value);
         }
 
       });
