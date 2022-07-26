@@ -305,6 +305,14 @@ class MicStream {
     return devices;
   }
 
+  static double getSampleRate(String uid){
+    if(Platform.isWindows){
+     return PortAudio.getDeviceInfo(int.parse(uid)).defaultSampleRate;
+    }
+    throw Exception("Unsupported platform");
+    return 0;
+  }
+
   static Future<AudioDevice?> getDefaultDevice(AudioSource source) async{
     AudioDevice? dev;
     if(Platform.isWindows){
